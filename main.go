@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"strconv"
@@ -34,7 +35,21 @@ func (m *boxL) HandleEvent(ev tcell.Event) bool {
 var errorText = "bob"
 
 func main() {
-	commandsToRun := os.Args[1:]
+	fullReload := false  // true to indicate each execution of the command gives a full set of data (vs single new datapoint)
+	fileContent := false // true to indicate that data should be loaded from a file
+	args := os.Args[1:]
+	if args[0] == "--full-reload" {
+		fullReload = true
+		args = args[1:]
+	}
+	if args[0] == "--file" {
+		fileContent = true
+		args = args[1:]
+	}
+
+	commandsToRun := args
+
+	fmt.Println(commandsToRun[0])
 
 	title := &views.TextBar{}
 	title.SetStyle(tcell.StyleDefault.
@@ -64,21 +79,48 @@ func main() {
 		}()
 
 		for {
+			var text string
 			command := commandsToRun[0]
-
-			out, err := exec.Command("/bin/bash", "-c", commandsToRun[0]).Output()
-			if err != nil {
-				errorText = err.Error()
-				textArea.SetText(err.Error())
+			if fileContent {
+				buf, err := ioutil.ReadFile(command)
+				if err != nil {
+					errorText = err.Error()
+					textArea.SetText(err.Error())
+				}
+				text = string(buf)
+			} else {
+				out, err := exec.Command("/bin/bash", "-c", command).Output()
+				if err != nil {
+					errorText = err.Error()
+					textArea.SetText(err.Error())
+				}
+				text = string(out)
 			}
 
-			value, err := strconv.Atoi(strings.TrimSpace(string(out)))
-			if err != nil {
-				errorText = err.Error()
-				textArea.SetText(err.Error())
+			if fullReload {
+				valueStrings := strings.Split(text, "\n")
+				newValues := []float64{}
+				for i := 0; i < len(valueStrings); i++ {
+					temp := strings.TrimSpace(valueStrings[i])
+					if temp != "" {
+						value, err := strconv.Atoi(strings.TrimSpace(valueStrings[i]))
+						if err != nil {
+							errorText = err.Error()
+							textArea.SetText(err.Error())
+							break
+						}
+						newValues = append(newValues, float64(value))
+					}
+				}
+				values = newValues
+			} else {
+				value, err := strconv.Atoi(strings.TrimSpace(text))
+				if err != nil {
+					errorText = err.Error()
+					textArea.SetText(err.Error())
+				}
+				values = append(values, float64(value))
 			}
-
-			values = append(values, float64(value))
 
 			// w, _ := textArea.Size()
 			graph := asciigraph.Plot(values, asciigraph.Height(20), asciigraph.Width(80))
